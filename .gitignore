@@ -162,3 +162,4 @@ cython_debug/
 /.vscode
 /build
 /notebooks
+src/csc/get_path_matrix.c
