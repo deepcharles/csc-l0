@@ -72,8 +72,8 @@ for b in activated_time_indexes:
 # Show reconstruction
 from alphacsc.utils import construct_X_multi
 
-Z_hat = ei.rearrange(activations, "n_times n_atoms -> n_atoms 1 n_times")
-reconstruction = construct_X_multi(Z_hat, dictionary[None, :, :])[0][0]
+Z_hat = ei.rearrange(activations, "n_times n_atoms -> 1 n_atoms n_times")
+reconstruction = construct_X_multi(Z_hat, dictionary[:, None, :])[0][0]
 
 fig, ax = fig_ax()
 ax.plot(signal[1_000:1_500])
