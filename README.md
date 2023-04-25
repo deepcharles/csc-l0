@@ -182,7 +182,7 @@ for k_iter in range(n_iter):
     dictionary, lambd_hats = update_d(
         X=[signal],
         Z=activations,
-        n_times_atom=win_len,
+        n_times_atom=n_times_atoms,
         lambd0=lambd_hats
     )
     print("ok")
