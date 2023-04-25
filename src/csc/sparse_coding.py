@@ -1,8 +1,9 @@
-from typing import Optional
+from typing import List, Optional
 
 import einops as ei
 import numexpr as ne
 import numpy as np
+from joblib import Parallel, delayed
 from numpy.lib.stride_tricks import sliding_window_view
 from numpy.typing import NDArray
 from scipy.fft import dct
@@ -13,10 +14,39 @@ from .utils import from_path_matrix_to_event_indexes
 NO_CONSTRAINT = "NoConstraint"
 AT_MOST_ONE_ACTIVATION = "AtMostOneActivation"
 AT_MOST_R_ACTIVATIONS = "AtMostRActivations"
-LIST_OF_CONSTRAINTS = [NO_CONSTRAINT, AT_MOST_ONE_ACTIVATION, AT_MOST_R_ACTIVATIONS]
+LIST_OF_CONSTRAINTS = [
+    NO_CONSTRAINT,
+    AT_MOST_ONE_ACTIVATION,
+    AT_MOST_R_ACTIVATIONS,
+]
 
 
 def update_z(
+    X: List[NDArray],
+    dictionary: NDArray,  # shape (n_atoms, n_times_atom)
+    penalty: float = 1.0,
+    constraint_str: str = "NoConstraint",
+    n_activations: Optional[int] = None,
+    n_jobs=2,
+) -> List[NDArray]:
+    @delayed
+    def get_z(signal):
+        return update_z_single_signal(
+            signal=signal,
+            dictionary=dictionary,
+            penalty=penalty,
+            constraint_str=constraint_str,
+            n_activations=n_activations,
+        )
+
+    activation_list = Parallel(n_jobs=n_jobs)(
+        get_z(signal=signal) for signal in X
+    )
+
+    return activation_list
+
+
+def update_z_single_signal(
     signal: NDArray,
     dictionary: NDArray,
     penalty: float = 1.0,
@@ -42,12 +72,17 @@ def update_z(
             [np.correlate(signal.flatten(), atom) for atom in dictionary],
             "n_atoms n_corrs -> n_atoms n_corrs",
         )
-        cost_vec = penalty - ei.reduce(
-            ne.evaluate("correlation_vec**2"), "n_atoms n_corrs->n_corrs", "max"
+   
+        cost_vec = np.float32(penalty) - ei.reduce(
+            ne.evaluate("correlation_vec**2"),
+            "n_atoms n_corrs->n_corrs",
+            "max",
         ).astype(np.float32)
 
         # find the best temporal support for the activations
-        path_vec = get_path_matrix_cy(cost_vec=cost_vec, atom_length=atom_length)
+        path_vec = get_path_matrix_cy(
+            cost_vec=cost_vec, atom_length=atom_length
+        )
         path_vec = np.asarray(path_vec)
         activated_time_indexes = np.array(
             from_path_matrix_to_event_indexes(path_vec), dtype=int
@@ -59,17 +94,25 @@ def update_z(
             abs(correlation_vec)[:, activated_time_indexes], axis=atom_axis
         )
         activations = np.zeros((n_samples - atom_length + 1, n_atoms))
-        activated_indexes = np.s_[activated_time_indexes, activated_atom_indexes]
+        activated_indexes = np.s_[
+            activated_time_indexes, activated_atom_indexes
+        ]
         activations[activated_indexes] = correlation_vec.T[activated_indexes]
 
     elif constraint_str == NO_CONSTRAINT:
         signal_windowed = sliding_window_view(signal, window_shape=atom_length)
-        lstsq_solution, residuals, *_ = np.linalg.lstsq(a=dictionary.T, b=signal_windowed.T, rcond=None)
+        lstsq_solution, residuals, *_ = np.linalg.lstsq(
+            a=dictionary.T, b=signal_windowed.T, rcond=None
+        )
         norm_vec = np.linalg.norm(signal_windowed, axis=1)
-        cost_vec = ne.evaluate("penalty + residuals-norm_vec**2").astype(np.float32)
+        cost_vec = ne.evaluate("penalty + residuals-norm_vec**2").astype(
+            np.float32
+        )
 
         # find the best temporal support for the activations
-        path_vec = get_path_matrix_cy(cost_vec=cost_vec, atom_length=atom_length)
+        path_vec = get_path_matrix_cy(
+            cost_vec=cost_vec, atom_length=atom_length
+        )
         path_vec = np.asarray(path_vec)
         activated_time_indexes = np.array(
             from_path_matrix_to_event_indexes(path_vec), dtype=int
@@ -77,7 +120,9 @@ def update_z(
 
         # from the temporal support, retrieve the activation values
         activations = np.zeros((n_samples - atom_length + 1, n_atoms))
-        activations[activated_time_indexes] = lstsq_solution.T[activated_time_indexes]
+        activations[activated_time_indexes] = lstsq_solution.T[
+            activated_time_indexes
+        ]
 
     elif constraint_str == AT_MOST_R_ACTIVATIONS:
         raise NotImplementedError
@@ -103,7 +148,9 @@ def update_z_dct(
     dct_power_spectra_partitionned = np.partition(
         dct_transform_squared, kth=-n_activations, axis=1
     )
-    cost_vec = penalty - dct_power_spectra_partitionned[:, :-n_activations].sum(axis=1)
+    cost_vec = penalty - dct_power_spectra_partitionned[:, :-n_activations].sum(
+        axis=1
+    )
 
     # find the best temporal support for the activations
     path_vec = get_path_matrix_cy(cost_vec, atom_length=atom_length)
