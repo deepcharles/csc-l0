@@ -1,5 +1,7 @@
 # Sparse convolutional sparse coding with $\ell_0$ constraint
 
+Truong, C., & Moreau, T. (2024). Convolutional Sparse Coding for Time Series via a $\ell_0$ Penalty: an Efficient Algorithm with Statistical Guarantees. _Statistical Analysis and Data Mining: The ASA Data Science Journal_.
+
 ## Install
 
 ```bash
